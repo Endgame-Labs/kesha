@@ -34,6 +34,57 @@ You can also point the verifier at a different library path:
 go run ./cmd/verify -lib /path/to/libtiktoken_shim.dylib
 ```
 
+## Use From Another Go App
+
+Build the shared library first:
+
+```bash
+make build
+```
+
+Then import the Go wrapper and pass the path to the built library:
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+
+	"kesha/tiktokenffi"
+)
+
+func main() {
+	lib, err := tiktokenffi.Open("/Users/rtyer/projects/endgame/kesha/target/release/libtiktoken_shim.dylib")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer lib.Close()
+
+	count, err := lib.CountWithModel("gpt-4o", "hello world", tiktokenffi.EncodeOptions{})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("count:", count)
+
+	tokens, err := lib.EncodeWithEncoding("cl100k_base", "<|endoftext|>", tiktokenffi.EncodeOptions{
+		Mode: tiktokenffi.SpecialModeEncodeAsText,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("tokens:", tokens)
+}
+```
+
+While this repo is local-only, point your app at it with a `replace` directive:
+
+```bash
+go mod edit -require kesha@v0.0.0
+go mod edit -replace kesha=/Users/rtyer/projects/endgame/kesha
+go mod tidy
+```
+
 ## Special token modes
 
 The Go wrapper exposes four modes:
