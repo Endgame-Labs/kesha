@@ -1,7 +1,5 @@
 # Kesha
 
-<img width="250" height="250" alt="Kesha project image" src="https://github.com/user-attachments/assets/86482ee7-cfbe-4026-bd20-c5b0d24d7194" />
-
 Go bindings for token counting and encoding through the upstream OpenAI
 [`tiktoken`](https://github.com/openai/tiktoken) Rust core.
 
