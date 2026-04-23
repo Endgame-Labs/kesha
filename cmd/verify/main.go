@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"kesha/tiktokenffi"
+	"github.com/Endgame-Labs/kesha/tiktokenffi"
 )
 
 type encodeCase struct {

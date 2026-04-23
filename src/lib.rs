@@ -1,18 +1,10 @@
 use std::collections::{HashMap, HashSet};
-use std::env;
 use std::ffi::{CStr, CString};
-use std::fs;
 use std::os::raw::{c_char, c_int};
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use reqwest::blocking::Client;
-use sha1::Digest as Sha1Digest;
-use sha1::Sha1;
-use sha2::Sha256;
 use tiktoken::{CoreBPE, Rank};
 
 const OPENAI_TIKTOKEN_VERSION: &str = "0.12.0";
@@ -23,11 +15,11 @@ const O200K_PAT_STR: &str = "[^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}
 
 static ENCODING_CACHE: LazyLock<Mutex<HashMap<String, Arc<LoadedEncoding>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
-static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
-    Client::builder()
-        .build()
-        .expect("failed to build HTTP client")
-});
+
+const R50K_BASE_BPE: &[u8] = include_bytes!("data/r50k_base.tiktoken");
+const P50K_BASE_BPE: &[u8] = include_bytes!("data/p50k_base.tiktoken");
+const CL100K_BASE_BPE: &[u8] = include_bytes!("data/cl100k_base.tiktoken");
+const O200K_BASE_BPE: &[u8] = include_bytes!("data/o200k_base.tiktoken");
 
 #[repr(C)]
 pub struct TokenBuffer {
@@ -64,15 +56,15 @@ struct LoadedEncoding {
 }
 
 struct EncodingSpec {
-    bpe_url: &'static str,
-    expected_hash: &'static str,
+    bpe_name: &'static str,
+    bpe_data: &'static [u8],
     pat_str: &'static str,
     special_tokens: fn() -> HashMap<String, Rank>,
 }
 
 impl EncodingSpec {
     fn load(&self) -> Result<LoadedEncoding, String> {
-        let mergeable_ranks = load_tiktoken_bpe(self.bpe_url, self.expected_hash)?;
+        let mergeable_ranks = load_tiktoken_bpe(self.bpe_data, self.bpe_name)?;
         let special_tokens = (self.special_tokens)();
 
         let mut special_token_names = special_tokens.keys().cloned().collect::<Vec<_>>();
@@ -98,38 +90,38 @@ impl EncodingSpec {
 fn encoding_spec(name: &str) -> Result<EncodingSpec, String> {
     match name {
         "gpt2" | "r50k_base" => Ok(EncodingSpec {
-            bpe_url: "https://openaipublic.blob.core.windows.net/encodings/r50k_base.tiktoken",
-            expected_hash: "306cd27f03c1a714eca7108e03d66b7dc042abe8c258b44c199a7ed9838dd930",
+            bpe_name: "r50k_base.tiktoken",
+            bpe_data: R50K_BASE_BPE,
             pat_str: R50K_PAT_STR,
             special_tokens: special_tokens_r50k_base,
         }),
         "p50k_base" => Ok(EncodingSpec {
-            bpe_url: "https://openaipublic.blob.core.windows.net/encodings/p50k_base.tiktoken",
-            expected_hash: "94b5ca7dff4d00767bc256fdd1b27e5b17361d7b8a5f968547f9f23eb70d2069",
+            bpe_name: "p50k_base.tiktoken",
+            bpe_data: P50K_BASE_BPE,
             pat_str: R50K_PAT_STR,
             special_tokens: special_tokens_p50k_base,
         }),
         "p50k_edit" => Ok(EncodingSpec {
-            bpe_url: "https://openaipublic.blob.core.windows.net/encodings/p50k_base.tiktoken",
-            expected_hash: "94b5ca7dff4d00767bc256fdd1b27e5b17361d7b8a5f968547f9f23eb70d2069",
+            bpe_name: "p50k_base.tiktoken",
+            bpe_data: P50K_BASE_BPE,
             pat_str: R50K_PAT_STR,
             special_tokens: special_tokens_p50k_edit,
         }),
         "cl100k_base" => Ok(EncodingSpec {
-            bpe_url: "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken",
-            expected_hash: "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7",
+            bpe_name: "cl100k_base.tiktoken",
+            bpe_data: CL100K_BASE_BPE,
             pat_str: CL100K_PAT_STR,
             special_tokens: special_tokens_cl100k_base,
         }),
         "o200k_base" => Ok(EncodingSpec {
-            bpe_url: "https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken",
-            expected_hash: "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
+            bpe_name: "o200k_base.tiktoken",
+            bpe_data: O200K_BASE_BPE,
             pat_str: O200K_PAT_STR,
             special_tokens: special_tokens_o200k_base,
         }),
         "o200k_harmony" => Ok(EncodingSpec {
-            bpe_url: "https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken",
-            expected_hash: "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
+            bpe_name: "o200k_base.tiktoken",
+            bpe_data: O200K_BASE_BPE,
             pat_str: O200K_PAT_STR,
             special_tokens: special_tokens_o200k_harmony,
         }),
@@ -299,8 +291,7 @@ fn get_encoding_for_model(model_name: &str) -> Result<Arc<LoadedEncoding>, Strin
     get_encoding(encoding_name)
 }
 
-fn load_tiktoken_bpe(path: &str, expected_hash: &str) -> Result<HashMap<Vec<u8>, Rank>, String> {
-    let contents = read_file_cached(path, expected_hash)?;
+fn load_tiktoken_bpe(contents: &[u8], name: &str) -> Result<HashMap<Vec<u8>, Rank>, String> {
     let mut ranks = HashMap::new();
 
     for line in contents.split(|b| *b == b'\n') {
@@ -309,131 +300,24 @@ fn load_tiktoken_bpe(path: &str, expected_hash: &str) -> Result<HashMap<Vec<u8>,
         }
 
         let Some(separator_index) = line.iter().position(|b| *b == b' ') else {
-            return Err(format!("invalid tiktoken BPE line in {path}"));
+            return Err(format!("invalid tiktoken BPE line in {name}"));
         };
         let token = &line[..separator_index];
         let rank = &line[separator_index + 1..];
 
         let token_bytes = BASE64_STANDARD
             .decode(token)
-            .map_err(|err| format!("invalid base64 token in {path}: {err}"))?;
+            .map_err(|err| format!("invalid base64 token in {name}: {err}"))?;
         let rank_string = std::str::from_utf8(rank)
-            .map_err(|err| format!("invalid UTF-8 rank in {path}: {err}"))?;
+            .map_err(|err| format!("invalid UTF-8 rank in {name}: {err}"))?;
         let rank_value = rank_string
             .parse::<u32>()
-            .map_err(|err| format!("invalid rank in {path}: {err}"))?;
+            .map_err(|err| format!("invalid rank in {name}: {err}"))?;
 
         ranks.insert(token_bytes, rank_value);
     }
 
     Ok(ranks)
-}
-
-fn read_file_cached(path: &str, expected_hash: &str) -> Result<Vec<u8>, String> {
-    let (cache_dir, user_specified_cache) = cache_directory();
-    if let Some(cache_dir) = &cache_dir {
-        let cache_key = format!("{:x}", Sha1::digest(path.as_bytes()));
-        let cache_path = cache_dir.join(cache_key);
-        if cache_path.exists() {
-            let data = fs::read(&cache_path).map_err(|err| {
-                format!("failed to read cache file {}: {err}", cache_path.display())
-            })?;
-            if sha256_hex(&data) == expected_hash {
-                return Ok(data);
-            }
-            let _ = fs::remove_file(cache_path);
-        }
-    }
-
-    let contents = read_file(path)?;
-    if sha256_hex(&contents) != expected_hash {
-        return Err(format!(
-            "hash mismatch for data downloaded from {path} (expected {expected_hash})"
-        ));
-    }
-
-    if let Some(cache_dir) = cache_dir {
-        let cache_key = format!("{:x}", Sha1::digest(path.as_bytes()));
-        let cache_path = cache_dir.join(cache_key);
-        if let Err(err) = write_cache_file(&cache_dir, &cache_path, &contents) {
-            if user_specified_cache {
-                return Err(err);
-            }
-        }
-    }
-
-    Ok(contents)
-}
-
-fn cache_directory() -> (Option<PathBuf>, bool) {
-    if let Ok(dir) = env::var("TIKTOKEN_CACHE_DIR") {
-        if dir.is_empty() {
-            return (None, true);
-        }
-        return (Some(PathBuf::from(dir)), true);
-    }
-    if let Ok(dir) = env::var("DATA_GYM_CACHE_DIR") {
-        if dir.is_empty() {
-            return (None, true);
-        }
-        return (Some(PathBuf::from(dir)), true);
-    }
-    (Some(env::temp_dir().join("data-gym-cache")), false)
-}
-
-fn write_cache_file(cache_dir: &Path, cache_path: &Path, contents: &[u8]) -> Result<(), String> {
-    fs::create_dir_all(cache_dir).map_err(|err| {
-        format!(
-            "failed to create cache directory {}: {err}",
-            cache_dir.display()
-        )
-    })?;
-
-    let tmp_suffix = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|err| format!("failed to get system time: {err}"))?
-        .as_nanos();
-    let tmp_path = cache_path.with_extension(format!("{tmp_suffix}.tmp"));
-
-    fs::write(&tmp_path, contents).map_err(|err| {
-        format!(
-            "failed to write cache temp file {}: {err}",
-            tmp_path.display()
-        )
-    })?;
-    fs::rename(&tmp_path, cache_path).map_err(|err| {
-        format!(
-            "failed to move cache temp file {} into place {}: {err}",
-            tmp_path.display(),
-            cache_path.display()
-        )
-    })?;
-    Ok(())
-}
-
-fn read_file(path: &str) -> Result<Vec<u8>, String> {
-    if !path.contains("://") {
-        return fs::read(path).map_err(|err| format!("failed to read {path}: {err}"));
-    }
-
-    if !path.starts_with("http://") && !path.starts_with("https://") {
-        return Err(format!("unsupported URI scheme in {path}"));
-    }
-
-    let response = HTTP_CLIENT
-        .get(path)
-        .send()
-        .and_then(|resp| resp.error_for_status())
-        .map_err(|err| format!("failed to download {path}: {err}"))?;
-
-    response
-        .bytes()
-        .map(|bytes| bytes.to_vec())
-        .map_err(|err| format!("failed to read response body from {path}: {err}"))
-}
-
-fn sha256_hex(data: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(data))
 }
 
 fn parse_c_string(ptr: *const c_char, field_name: &str) -> Result<String, String> {

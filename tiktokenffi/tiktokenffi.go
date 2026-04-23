@@ -45,14 +45,14 @@ type Library struct {
 }
 
 func Open(path string) (*Library, error) {
-	handle, err := purego.Dlopen(path, purego.RTLD_NOW|purego.RTLD_GLOBAL)
+	handle, err := openHandle(path)
 	if err != nil {
 		return nil, err
 	}
 
 	lib := &Library{handle: handle}
 	if err := lib.registerSymbols(); err != nil {
-		closeErr := purego.Dlclose(handle)
+		closeErr := closeHandle(handle)
 		if closeErr != nil {
 			return nil, fmt.Errorf("%w; also failed to close library: %v", err, closeErr)
 		}
@@ -73,7 +73,7 @@ func (l *Library) Close() error {
 	if l.handle == 0 {
 		return nil
 	}
-	if err := purego.Dlclose(l.handle); err != nil {
+	if err := closeHandle(l.handle); err != nil {
 		return err
 	}
 
@@ -322,7 +322,7 @@ func (l *Library) registerSymbols() error {
 }
 
 func registerSymbol(handle uintptr, name string, fn any) (err error) {
-	symbol, err := purego.Dlsym(handle, name)
+	symbol, err := lookupSymbol(handle, name)
 	if err != nil {
 		return fmt.Errorf("load symbol %q: %w", name, err)
 	}
@@ -372,7 +372,10 @@ func cStringBytes(value string) ([]byte, error) {
 }
 
 func copyTokens(buffer tokenBuffer) []uint32 {
-	if buffer.Data == nil || buffer.Len == 0 {
+	if buffer.Len == 0 {
+		return []uint32{}
+	}
+	if buffer.Data == nil {
 		return nil
 	}
 	src := unsafe.Slice(buffer.Data, buffer.Len)
