@@ -15,13 +15,13 @@ func TestFindLibraryDoesNotLoadFromWorkingDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dir := t.TempDir()
 	t.Cleanup(func() {
 		if err := os.Chdir(oldwd); err != nil {
 			t.Fatalf("restore working directory: %v", err)
 		}
 	})
 
-	dir := t.TempDir()
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
