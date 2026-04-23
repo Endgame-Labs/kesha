@@ -99,15 +99,22 @@ func main() {
 			fatalf("%s: %v", tc.label, err)
 		}
 	}
+	if _, err := lib.DecodeWithEncoding("cl100k_base", []uint32{999_999_999}); err == nil {
+		fatalf("decode invalid token: expected error, got success")
+	} else if !strings.Contains(err.Error(), "unknown token") {
+		fatalf("decode invalid token: expected unknown token error, got %q", err.Error())
+	}
+	fmt.Println("ok  invalid decode token     error=\"unknown token\"")
 
 	fmt.Println("verification passed")
 }
 
 func runCase(lib *tiktokenffi.Library, tc encodeCase) error {
 	var (
-		tokens []uint32
-		count  uint64
-		err    error
+		tokens  []uint32
+		count   uint64
+		decoded string
+		err     error
 	)
 
 	if tc.useModel {
@@ -115,10 +122,16 @@ func runCase(lib *tiktokenffi.Library, tc encodeCase) error {
 		if err == nil {
 			count, err = lib.CountWithModel(tc.name, tc.text, tc.options)
 		}
+		if err == nil {
+			decoded, err = lib.DecodeWithModel(tc.name, tokens)
+		}
 	} else {
 		tokens, err = lib.EncodeWithEncoding(tc.name, tc.text, tc.options)
 		if err == nil {
 			count, err = lib.CountWithEncoding(tc.name, tc.text, tc.options)
+		}
+		if err == nil {
+			decoded, err = lib.DecodeWithEncoding(tc.name, tokens)
 		}
 	}
 
@@ -144,6 +157,9 @@ func runCase(lib *tiktokenffi.Library, tc encodeCase) error {
 	}
 	if tc.wantCount != 0 && count != tc.wantCount {
 		return fmt.Errorf("unexpected count: got=%d want=%d", count, tc.wantCount)
+	}
+	if decoded != tc.text {
+		return fmt.Errorf("unexpected decoded text: got=%q want=%q", decoded, tc.text)
 	}
 
 	fmt.Printf("ok  %-24s count=%d tokens=%v\n", tc.label, count, tokens)

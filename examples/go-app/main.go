@@ -20,5 +20,11 @@ func main() {
 		log.Fatal(err)
 	}
 
+	decoded, err := tiktoken.Decode("gpt-4o", tokens)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	fmt.Printf("%q is %d tokens: %v\n", text, count, tokens)
+	fmt.Printf("decoded: %q\n", decoded)
 }
