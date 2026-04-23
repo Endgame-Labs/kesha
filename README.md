@@ -10,13 +10,13 @@ tokenizer assets.
 
 ## Quickstart
 
-Install the native library for your platform:
+Install the native library for a supported platform:
 
 ```bash
 go run github.com/Endgame-Labs/kesha/cmd/kesha-install@latest
 ```
 
-Add the Go module:
+From your Go app's module directory, add Kesha:
 
 ```bash
 go get github.com/Endgame-Labs/kesha
@@ -55,6 +55,27 @@ On macOS the library is `libtiktoken_shim.dylib`; on Windows it is
 For safety, default discovery does not load native libraries from the current
 working directory. Local development commands pass explicit paths to the shared
 library instead.
+
+Supported release artifacts currently cover:
+
+- `darwin/arm64`
+- `linux/amd64`
+- `windows/amd64`
+
+Other platforms can still build from source, but `kesha-install` will only work
+once a matching release artifact exists.
+
+## Why An Installer?
+
+Most Go modules work with only `go get`. Kesha has one extra install step
+because it loads the upstream Rust tokenizer through a small native shared
+library. That keeps consuming Go builds CGO-free while avoiding tokenizer drift
+from a Go port.
+
+The installer is explicit by design: Kesha does not silently download native
+code at application runtime. Future releases may add embedded platform packages
+for a more automatic Go experience, but the current model keeps the native
+library install visible and verifiable.
 
 ## API Examples
 
