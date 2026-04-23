@@ -6,6 +6,40 @@ on:
     branches: [main]
 
 jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Rust components
+        run: rustup component add rustfmt clippy
+
+      - name: Rust format
+        run: cargo fmt -- --check
+
+      - name: Rust clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.11
+
+      - name: golangci-lint example app
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.11
+          working-directory: examples/go-app
+          args: --config ../../.golangci.yml
+
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

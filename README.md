@@ -115,6 +115,8 @@ make verify
 Run the normal checks:
 
 ```bash
+make fmt-check
+make lint
 cargo test --locked
 go test ./...
 go test -race ./...

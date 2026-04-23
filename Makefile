@@ -21,7 +21,7 @@ else
 RELEASE_ASSET := libtiktoken_shim_$(GOOS)_$(GOARCH).$(LIB_EXT)
 endif
 
-.PHONY: all build verify fmt tidy example package clean
+.PHONY: all build verify fmt fmt-check tidy lint lint-go lint-rust example package clean
 
 all: build
 
@@ -33,11 +33,24 @@ verify: build
 
 fmt:
 	cargo fmt
-	gofmt -w ./tiktoken ./tiktokenffi ./cmd/verify ./cmd/kesha-install
+	gofmt -w ./tiktoken ./tiktokenffi ./cmd/verify ./cmd/kesha-install ./examples/go-app
+
+fmt-check:
+	cargo fmt -- --check
+	test -z "$$(gofmt -l ./tiktoken ./tiktokenffi ./cmd/verify ./cmd/kesha-install ./examples/go-app)"
 
 tidy:
 	go mod tidy
 	cd examples/go-app && go mod tidy
+
+lint: lint-go lint-rust
+
+lint-go:
+	golangci-lint run ./...
+	cd examples/go-app && golangci-lint run --config ../../.golangci.yml ./...
+
+lint-rust:
+	cargo clippy --locked --all-targets -- -D warnings
 
 example: build
 	cd examples/go-app && KESHA_TIKTOKEN_LIB=../../$(LIB_NAME) go run .

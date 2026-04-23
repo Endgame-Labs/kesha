@@ -475,8 +475,14 @@ pub extern "C" fn tiktoken_version() -> *mut c_char {
     ))
 }
 
+/// # Safety
+///
+/// `model_name` must be a valid NUL-terminated UTF-8 C string. `out_encoding_name`
+/// must be valid to write one pointer. If `out_error` is non-null, it must be
+/// valid to write one pointer. Returned strings must be released with
+/// `tiktoken_free_string`.
 #[unsafe(no_mangle)]
-pub extern "C" fn tiktoken_encoding_name_for_model(
+pub unsafe extern "C" fn tiktoken_encoding_name_for_model(
     model_name: *const c_char,
     out_encoding_name: *mut *mut c_char,
     out_error: *mut *mut c_char,
@@ -508,8 +514,14 @@ pub extern "C" fn tiktoken_encoding_name_for_model(
     }
 }
 
+/// # Safety
+///
+/// `encoding_name`, `input`, and `special_tokens` when non-null must be valid
+/// NUL-terminated UTF-8 C strings. `out_count` must be valid to write one
+/// `u64`. If `out_error` is non-null, it must be valid to write one pointer.
+/// Returned error strings must be released with `tiktoken_free_string`.
 #[unsafe(no_mangle)]
-pub extern "C" fn tiktoken_count_with_encoding(
+pub unsafe extern "C" fn tiktoken_count_with_encoding(
     encoding_name: *const c_char,
     input: *const c_char,
     special_mode: u32,
@@ -547,8 +559,14 @@ pub extern "C" fn tiktoken_count_with_encoding(
     }
 }
 
+/// # Safety
+///
+/// `model_name`, `input`, and `special_tokens` when non-null must be valid
+/// NUL-terminated UTF-8 C strings. `out_count` must be valid to write one
+/// `u64`. If `out_error` is non-null, it must be valid to write one pointer.
+/// Returned error strings must be released with `tiktoken_free_string`.
 #[unsafe(no_mangle)]
-pub extern "C" fn tiktoken_count_with_model(
+pub unsafe extern "C" fn tiktoken_count_with_model(
     model_name: *const c_char,
     input: *const c_char,
     special_mode: u32,
@@ -586,8 +604,15 @@ pub extern "C" fn tiktoken_count_with_model(
     }
 }
 
+/// # Safety
+///
+/// `encoding_name`, `input`, and `special_tokens` when non-null must be valid
+/// NUL-terminated UTF-8 C strings. `out_tokens` must be valid to write one
+/// `TokenBuffer`. If `out_error` is non-null, it must be valid to write one
+/// pointer. Returned buffers must be released with `tiktoken_free_u32_buffer`,
+/// and returned error strings must be released with `tiktoken_free_string`.
 #[unsafe(no_mangle)]
-pub extern "C" fn tiktoken_encode_with_encoding(
+pub unsafe extern "C" fn tiktoken_encode_with_encoding(
     encoding_name: *const c_char,
     input: *const c_char,
     special_mode: u32,
@@ -627,8 +652,15 @@ pub extern "C" fn tiktoken_encode_with_encoding(
     }
 }
 
+/// # Safety
+///
+/// `model_name`, `input`, and `special_tokens` when non-null must be valid
+/// NUL-terminated UTF-8 C strings. `out_tokens` must be valid to write one
+/// `TokenBuffer`. If `out_error` is non-null, it must be valid to write one
+/// pointer. Returned buffers must be released with `tiktoken_free_u32_buffer`,
+/// and returned error strings must be released with `tiktoken_free_string`.
 #[unsafe(no_mangle)]
-pub extern "C" fn tiktoken_encode_with_model(
+pub unsafe extern "C" fn tiktoken_encode_with_model(
     model_name: *const c_char,
     input: *const c_char,
     special_mode: u32,
@@ -668,8 +700,13 @@ pub extern "C" fn tiktoken_encode_with_model(
     }
 }
 
+/// # Safety
+///
+/// `ptr` must be null or a pointer returned by this library from
+/// `tiktoken_version`, `tiktoken_encoding_name_for_model`, or an error output.
+/// It must be released at most once.
 #[unsafe(no_mangle)]
-pub extern "C" fn tiktoken_free_string(ptr: *mut c_char) {
+pub unsafe extern "C" fn tiktoken_free_string(ptr: *mut c_char) {
     if !ptr.is_null() {
         unsafe {
             drop(CString::from_raw(ptr));
@@ -677,8 +714,13 @@ pub extern "C" fn tiktoken_free_string(ptr: *mut c_char) {
     }
 }
 
+/// # Safety
+///
+/// `ptr` and `len` must be the exact buffer pair returned by
+/// `tiktoken_encode_with_encoding` or `tiktoken_encode_with_model`. The buffer
+/// must be released at most once.
 #[unsafe(no_mangle)]
-pub extern "C" fn tiktoken_free_u32_buffer(ptr: *mut u32, len: u64) {
+pub unsafe extern "C" fn tiktoken_free_u32_buffer(ptr: *mut u32, len: u64) {
     if !ptr.is_null() {
         unsafe {
             let slice = std::ptr::slice_from_raw_parts_mut(ptr, len as usize);
