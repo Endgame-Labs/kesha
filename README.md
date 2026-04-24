@@ -94,13 +94,23 @@ if err != nil {
 	log.Fatal(err)
 }
 fmt.Println(tokens)
+
+text, err := client.Decode("gpt-4o", tokens)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(text)
 ```
 
 Use an encoding directly:
 
 ```go
 count, err := tiktoken.CountWithEncoding("cl100k_base", "hello world", tiktoken.EncodeOptions{})
+text, err := tiktoken.DecodeWithEncoding("cl100k_base", []uint32{15339, 1917})
 ```
+
+`Decode` returns UTF-8 text using replacement semantics for invalid UTF-8 token
+boundaries, matching upstream `tiktoken`'s default decode behavior.
 
 Control special-token behavior:
 

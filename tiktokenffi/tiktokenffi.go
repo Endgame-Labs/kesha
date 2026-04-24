@@ -40,6 +40,8 @@ type Library struct {
 	countWithModel       func(*byte, *byte, uint32, *byte, *uint64, **byte) int32
 	encodeWithEncoding   func(*byte, *byte, uint32, *byte, *tokenBuffer, **byte) int32
 	encodeWithModel      func(*byte, *byte, uint32, *byte, *tokenBuffer, **byte) int32
+	decodeWithEncoding   func(*byte, *uint32, uint64, **byte, **byte) int32
+	decodeWithModel      func(*byte, *uint32, uint64, **byte, **byte) int32
 	freeString           func(*byte)
 	freeU32Buffer        func(*uint32, uint64)
 }
@@ -265,6 +267,66 @@ func (l *Library) EncodeWithModel(modelName, text string, options EncodeOptions)
 	return copyTokens(buffer), nil
 }
 
+func (l *Library) DecodeWithEncoding(encodingName string, tokens []uint32) (string, error) {
+	if err := l.lockOpen(); err != nil {
+		return "", err
+	}
+	defer l.mu.Unlock()
+
+	encodingBytes, err := cStringBytes(encodingName)
+	if err != nil {
+		return "", err
+	}
+
+	var tokenPtr *uint32
+	if len(tokens) > 0 {
+		tokenPtr = &tokens[0]
+	}
+
+	var out *byte
+	var outErr *byte
+	status := l.decodeWithEncoding(&encodingBytes[0], tokenPtr, uint64(len(tokens)), &out, &outErr)
+	if status != 0 {
+		return "", l.takeError(outErr)
+	}
+	if out == nil {
+		return "", errors.New("library returned nil decoded text")
+	}
+	defer l.freeString(out)
+
+	return goString(out), nil
+}
+
+func (l *Library) DecodeWithModel(modelName string, tokens []uint32) (string, error) {
+	if err := l.lockOpen(); err != nil {
+		return "", err
+	}
+	defer l.mu.Unlock()
+
+	modelBytes, err := cStringBytes(modelName)
+	if err != nil {
+		return "", err
+	}
+
+	var tokenPtr *uint32
+	if len(tokens) > 0 {
+		tokenPtr = &tokens[0]
+	}
+
+	var out *byte
+	var outErr *byte
+	status := l.decodeWithModel(&modelBytes[0], tokenPtr, uint64(len(tokens)), &out, &outErr)
+	if status != 0 {
+		return "", l.takeError(outErr)
+	}
+	if out == nil {
+		return "", errors.New("library returned nil decoded text")
+	}
+	defer l.freeString(out)
+
+	return goString(out), nil
+}
+
 func DefaultLibName() string {
 	switch runtime.GOOS {
 	case "darwin":
@@ -308,6 +370,8 @@ func (l *Library) registerSymbols() error {
 		{"tiktoken_count_with_model", &l.countWithModel},
 		{"tiktoken_encode_with_encoding", &l.encodeWithEncoding},
 		{"tiktoken_encode_with_model", &l.encodeWithModel},
+		{"tiktoken_decode_with_encoding", &l.decodeWithEncoding},
+		{"tiktoken_decode_with_model", &l.decodeWithModel},
 		{"tiktoken_free_string", &l.freeString},
 		{"tiktoken_free_u32_buffer", &l.freeU32Buffer},
 	}
@@ -358,6 +422,8 @@ func (l *Library) reset() {
 	l.countWithModel = nil
 	l.encodeWithEncoding = nil
 	l.encodeWithModel = nil
+	l.decodeWithEncoding = nil
+	l.decodeWithModel = nil
 	l.freeString = nil
 	l.freeU32Buffer = nil
 }

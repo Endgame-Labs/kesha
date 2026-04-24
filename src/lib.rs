@@ -51,6 +51,7 @@ impl TryFrom<u32> for SpecialMode {
 
 struct LoadedEncoding {
     core_bpe: CoreBPE,
+    decoder: HashMap<Rank, Vec<u8>>,
     special_tokens: Vec<String>,
     special_token_set: HashSet<String>,
 }
@@ -66,6 +67,7 @@ impl EncodingSpec {
     fn load(&self) -> Result<LoadedEncoding, String> {
         let mergeable_ranks = load_tiktoken_bpe(self.bpe_data, self.bpe_name)?;
         let special_tokens = (self.special_tokens)();
+        let decoder = build_decoder(&mergeable_ranks, &special_tokens);
 
         let mut special_token_names = special_tokens.keys().cloned().collect::<Vec<_>>();
         special_token_names.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
@@ -81,6 +83,7 @@ impl EncodingSpec {
 
         Ok(LoadedEncoding {
             core_bpe,
+            decoder,
             special_tokens: special_token_names,
             special_token_set,
         })
@@ -320,6 +323,22 @@ fn load_tiktoken_bpe(contents: &[u8], name: &str) -> Result<HashMap<Vec<u8>, Ran
     Ok(ranks)
 }
 
+fn build_decoder(
+    mergeable_ranks: &HashMap<Vec<u8>, Rank>,
+    special_tokens: &HashMap<String, Rank>,
+) -> HashMap<Rank, Vec<u8>> {
+    let mut decoder = mergeable_ranks
+        .iter()
+        .map(|(bytes, rank)| (*rank, bytes.clone()))
+        .collect::<HashMap<_, _>>();
+
+    for (token, rank) in special_tokens {
+        decoder.insert(*rank, token.as_bytes().to_vec());
+    }
+
+    decoder
+}
+
 fn parse_c_string(ptr: *const c_char, field_name: &str) -> Result<String, String> {
     if ptr.is_null() {
         return Err(format!("{field_name} cannot be null"));
@@ -427,6 +446,19 @@ fn first_disallowed_special<'a>(
         }
     }
     None
+}
+
+fn decode_tokens(encoding: &LoadedEncoding, tokens: &[Rank]) -> Result<String, String> {
+    let mut bytes = Vec::with_capacity(tokens.len() * 2);
+    for token in tokens {
+        let token_bytes = encoding
+            .decoder
+            .get(token)
+            .ok_or_else(|| format!("unknown token: {token}"))?;
+        bytes.extend(token_bytes);
+    }
+
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 fn into_c_string_ptr(value: String) -> *mut c_char {
@@ -702,8 +734,129 @@ pub unsafe extern "C" fn tiktoken_encode_with_model(
 
 /// # Safety
 ///
+/// `encoding_name` must be a valid NUL-terminated UTF-8 C string. `tokens`
+/// must be null when `len` is zero, or valid to read `len` `u32` values.
+/// `out_text` must be valid to write one pointer. If `out_error` is non-null,
+/// it must be valid to write one pointer. Returned strings and returned error
+/// strings must be released with `tiktoken_free_string`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tiktoken_decode_with_encoding(
+    encoding_name: *const c_char,
+    tokens: *const u32,
+    len: u64,
+    out_text: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> c_int {
+    clear_error(out_error);
+
+    if out_text.is_null() {
+        write_error(out_error, String::from("out_text cannot be null"));
+        return 1;
+    }
+    if tokens.is_null() && len != 0 {
+        unsafe {
+            *out_text = std::ptr::null_mut();
+        }
+        write_error(
+            out_error,
+            String::from("tokens cannot be null when len is non-zero"),
+        );
+        return 1;
+    }
+
+    let result = parse_c_string(encoding_name, "encoding_name")
+        .and_then(|name| get_encoding(&name))
+        .and_then(|encoding| {
+            let token_slice = if len == 0 {
+                &[][..]
+            } else {
+                unsafe { std::slice::from_raw_parts(tokens, len as usize) }
+            };
+            decode_tokens(&encoding, token_slice)
+        });
+
+    match result {
+        Ok(text) => {
+            unsafe {
+                *out_text = into_c_string_ptr(text);
+            }
+            0
+        }
+        Err(err) => {
+            unsafe {
+                *out_text = std::ptr::null_mut();
+            }
+            write_error(out_error, err);
+            1
+        }
+    }
+}
+
+/// # Safety
+///
+/// `model_name` must be a valid NUL-terminated UTF-8 C string. `tokens` must
+/// be null when `len` is zero, or valid to read `len` `u32` values. `out_text`
+/// must be valid to write one pointer. If `out_error` is non-null, it must be
+/// valid to write one pointer. Returned strings and returned error strings must
+/// be released with `tiktoken_free_string`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tiktoken_decode_with_model(
+    model_name: *const c_char,
+    tokens: *const u32,
+    len: u64,
+    out_text: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> c_int {
+    clear_error(out_error);
+
+    if out_text.is_null() {
+        write_error(out_error, String::from("out_text cannot be null"));
+        return 1;
+    }
+    if tokens.is_null() && len != 0 {
+        unsafe {
+            *out_text = std::ptr::null_mut();
+        }
+        write_error(
+            out_error,
+            String::from("tokens cannot be null when len is non-zero"),
+        );
+        return 1;
+    }
+
+    let result = parse_c_string(model_name, "model_name")
+        .and_then(|name| get_encoding_for_model(&name))
+        .and_then(|encoding| {
+            let token_slice = if len == 0 {
+                &[][..]
+            } else {
+                unsafe { std::slice::from_raw_parts(tokens, len as usize) }
+            };
+            decode_tokens(&encoding, token_slice)
+        });
+
+    match result {
+        Ok(text) => {
+            unsafe {
+                *out_text = into_c_string_ptr(text);
+            }
+            0
+        }
+        Err(err) => {
+            unsafe {
+                *out_text = std::ptr::null_mut();
+            }
+            write_error(out_error, err);
+            1
+        }
+    }
+}
+
+/// # Safety
+///
 /// `ptr` must be null or a pointer returned by this library from
-/// `tiktoken_version`, `tiktoken_encoding_name_for_model`, or an error output.
+/// `tiktoken_version`, `tiktoken_encoding_name_for_model`,
+/// `tiktoken_decode_with_encoding`, `tiktoken_decode_with_model`, or an error output.
 /// It must be released at most once.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tiktoken_free_string(ptr: *mut c_char) {

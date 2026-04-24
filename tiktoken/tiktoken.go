@@ -109,6 +109,20 @@ func (c *Client) EncodeWithEncoding(encoding, text string, options EncodeOptions
 	return c.lib.EncodeWithEncoding(encoding, text, options)
 }
 
+func (c *Client) Decode(model string, tokens []uint32) (string, error) {
+	if c == nil || c.lib == nil {
+		return "", errors.New("tiktoken client is not initialized")
+	}
+	return c.lib.DecodeWithModel(model, tokens)
+}
+
+func (c *Client) DecodeWithEncoding(encoding string, tokens []uint32) (string, error) {
+	if c == nil || c.lib == nil {
+		return "", errors.New("tiktoken client is not initialized")
+	}
+	return c.lib.DecodeWithEncoding(encoding, tokens)
+}
+
 func Count(model, text string) (int, error) {
 	client, err := defaultClient()
 	if err != nil {
@@ -155,6 +169,22 @@ func EncodeWithEncoding(encoding, text string, options EncodeOptions) ([]uint32,
 		return nil, err
 	}
 	return client.EncodeWithEncoding(encoding, text, options)
+}
+
+func Decode(model string, tokens []uint32) (string, error) {
+	client, err := defaultClient()
+	if err != nil {
+		return "", err
+	}
+	return client.Decode(model, tokens)
+}
+
+func DecodeWithEncoding(encoding string, tokens []uint32) (string, error) {
+	client, err := defaultClient()
+	if err != nil {
+		return "", err
+	}
+	return client.DecodeWithEncoding(encoding, tokens)
 }
 
 func FindLibrary() (string, error) {
