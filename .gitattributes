@@ -1,2 +1,2 @@
 *.go text eol=lf
-src/data/*.tiktoken -diff linguist-generated=true
+src/data/*.tiktoken -text -diff linguist-generated=true

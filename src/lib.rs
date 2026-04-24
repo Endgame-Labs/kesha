@@ -306,7 +306,10 @@ fn load_tiktoken_bpe(contents: &[u8], name: &str) -> Result<HashMap<Vec<u8>, Ran
             return Err(format!("invalid tiktoken BPE line in {name}"));
         };
         let token = &line[..separator_index];
-        let rank = &line[separator_index + 1..];
+        let mut rank = &line[separator_index + 1..];
+        if rank.ends_with(b"\r") {
+            rank = &rank[..rank.len() - 1];
+        }
 
         let token_bytes = BASE64_STANDARD
             .decode(token)
@@ -921,5 +924,14 @@ mod tests {
         )
         .expect("encode special token");
         assert_eq!(special, vec![100257]);
+    }
+
+    #[test]
+    fn load_tiktoken_bpe_accepts_crlf_line_endings() {
+        let ranks = load_tiktoken_bpe(b"IQ== 0\r\nIg== 1\r\n", "test.tiktoken")
+            .expect("parse CRLF-terminated BPE data");
+
+        assert_eq!(ranks.get(&b"!".to_vec()), Some(&0));
+        assert_eq!(ranks.get(&b"\"".to_vec()), Some(&1));
     }
 }
