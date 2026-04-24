@@ -931,7 +931,7 @@ mod tests {
         let ranks = load_tiktoken_bpe(b"IQ== 0\r\nIg== 1\r\n", "test.tiktoken")
             .expect("parse CRLF-terminated BPE data");
 
-        assert_eq!(ranks.get(&b"!".to_vec()), Some(&0));
-        assert_eq!(ranks.get(&b"\"".to_vec()), Some(&1));
+        assert_eq!(ranks.get(b"!".as_slice()), Some(&0));
+        assert_eq!(ranks.get(b"\"".as_slice()), Some(&1));
     }
 }
