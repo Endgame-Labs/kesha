@@ -55,7 +55,7 @@ jobs:
             sha256sum "dist/$asset" > "dist/$asset.sha256"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: native-${{ runner.os }}
           path: dist/*
