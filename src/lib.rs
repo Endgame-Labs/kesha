@@ -306,7 +306,10 @@ fn load_tiktoken_bpe(contents: &[u8], name: &str) -> Result<HashMap<Vec<u8>, Ran
             return Err(format!("invalid tiktoken BPE line in {name}"));
         };
         let token = &line[..separator_index];
-        let rank = &line[separator_index + 1..];
+        let mut rank = &line[separator_index + 1..];
+        if rank.ends_with(b"\r") {
+            rank = &rank[..rank.len() - 1];
+        }
 
         let token_bytes = BASE64_STANDARD
             .decode(token)
@@ -879,5 +882,56 @@ pub unsafe extern "C" fn tiktoken_free_u32_buffer(ptr: *mut u32, len: u64) {
             let slice = std::ptr::slice_from_raw_parts_mut(ptr, len as usize);
             drop(Box::from_raw(slice));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_as_text_treats_special_token_strings_as_literal_text() {
+        let encoding = get_encoding("cl100k_base").expect("load encoding");
+        let text = "<|endoftext|>";
+
+        let disallowed = encode_tokens(
+            &encoding,
+            text,
+            SpecialMode::Disallow as u32,
+            std::ptr::null(),
+        )
+        .expect_err("special token text should be disallowed by default");
+        assert!(disallowed.contains("disallowed special token"));
+
+        let literal = encode_tokens(
+            &encoding,
+            text,
+            SpecialMode::EncodeAsText as u32,
+            std::ptr::null(),
+        )
+        .expect("encode special-token text literally");
+        assert_ne!(literal, vec![100257]);
+        assert_eq!(
+            decode_tokens(&encoding, &literal).expect("decode literal tokens"),
+            text
+        );
+
+        let special = encode_tokens(
+            &encoding,
+            text,
+            SpecialMode::AllowAll as u32,
+            std::ptr::null(),
+        )
+        .expect("encode special token");
+        assert_eq!(special, vec![100257]);
+    }
+
+    #[test]
+    fn load_tiktoken_bpe_accepts_crlf_line_endings() {
+        let ranks = load_tiktoken_bpe(b"IQ== 0\r\nIg== 1\r\n", "test.tiktoken")
+            .expect("parse CRLF-terminated BPE data");
+
+        assert_eq!(ranks.get(b"!".as_slice()), Some(&0));
+        assert_eq!(ranks.get(b"\"".as_slice()), Some(&1));
     }
 }

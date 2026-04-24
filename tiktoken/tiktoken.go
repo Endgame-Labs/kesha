@@ -24,6 +24,12 @@ const (
 
 type EncodeOptions = tiktokenffi.EncodeOptions
 
+// TreatSpecialTokensAsText returns options for raw user/content paths where
+// strings such as "<|endoftext|>" should be encoded as normal text.
+func TreatSpecialTokensAsText() EncodeOptions {
+	return EncodeOptions{Mode: SpecialModeEncodeAsText}
+}
+
 type Client struct {
 	lib *tiktokenffi.Library
 }
@@ -44,7 +50,41 @@ func OpenDefault() (*Client, error) {
 	return Open(path)
 }
 
+// DefaultClient returns the process-wide default client, opening it on first use.
+//
+// Callers that use package-level helpers such as Count, Encode, and Decode do
+// not need to call this directly. It is available for apps that want to reuse
+// the same cached client while still calling explicit Client methods.
+func DefaultClient() (*Client, error) {
+	return defaultClient()
+}
+
+// CloseDefaultClient closes and clears the process-wide default client.
+//
+// Most long-running applications should leave the default client open for the
+// life of the process. Tests or short-lived tools can call CloseDefaultClient
+// when they need to release the native library handle or change discovery
+// settings.
+func CloseDefaultClient() error {
+	defaultMu.Lock()
+	client := defaultLib
+	defaultLib = nil
+	defaultMu.Unlock()
+
+	return client.close()
+}
+
 func (c *Client) Close() error {
+	defaultMu.Lock()
+	if defaultLib == c {
+		defaultLib = nil
+	}
+	defaultMu.Unlock()
+
+	return c.close()
+}
+
+func (c *Client) close() error {
 	if c == nil || c.lib == nil {
 		return nil
 	}
@@ -124,7 +164,7 @@ func (c *Client) DecodeWithEncoding(encoding string, tokens []uint32) (string, e
 }
 
 func Count(model, text string) (int, error) {
-	client, err := defaultClient()
+	client, err := defaultPackageClient()
 	if err != nil {
 		return 0, err
 	}
@@ -132,7 +172,7 @@ func Count(model, text string) (int, error) {
 }
 
 func CountWithOptions(model, text string, options EncodeOptions) (int, error) {
-	client, err := defaultClient()
+	client, err := defaultPackageClient()
 	if err != nil {
 		return 0, err
 	}
@@ -140,7 +180,7 @@ func CountWithOptions(model, text string, options EncodeOptions) (int, error) {
 }
 
 func CountWithEncoding(encoding, text string, options EncodeOptions) (int, error) {
-	client, err := defaultClient()
+	client, err := defaultPackageClient()
 	if err != nil {
 		return 0, err
 	}
@@ -148,7 +188,7 @@ func CountWithEncoding(encoding, text string, options EncodeOptions) (int, error
 }
 
 func Encode(model, text string) ([]uint32, error) {
-	client, err := defaultClient()
+	client, err := defaultPackageClient()
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +196,7 @@ func Encode(model, text string) ([]uint32, error) {
 }
 
 func EncodeWithOptions(model, text string, options EncodeOptions) ([]uint32, error) {
-	client, err := defaultClient()
+	client, err := defaultPackageClient()
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +204,7 @@ func EncodeWithOptions(model, text string, options EncodeOptions) ([]uint32, err
 }
 
 func EncodeWithEncoding(encoding, text string, options EncodeOptions) ([]uint32, error) {
-	client, err := defaultClient()
+	client, err := defaultPackageClient()
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +212,7 @@ func EncodeWithEncoding(encoding, text string, options EncodeOptions) ([]uint32,
 }
 
 func Decode(model string, tokens []uint32) (string, error) {
-	client, err := defaultClient()
+	client, err := defaultPackageClient()
 	if err != nil {
 		return "", err
 	}
@@ -180,7 +220,7 @@ func Decode(model string, tokens []uint32) (string, error) {
 }
 
 func DecodeWithEncoding(encoding string, tokens []uint32) (string, error) {
-	client, err := defaultClient()
+	client, err := defaultPackageClient()
 	if err != nil {
 		return "", err
 	}
@@ -221,21 +261,40 @@ func FindLibrary() (string, error) {
 }
 
 var (
-	defaultMu     sync.Mutex
-	defaultLib    *Client
-	defaultLibErr error
+	defaultMu         sync.Mutex
+	defaultLib        *Client
+	openDefaultClient = OpenDefault
 )
 
 func defaultClient() (*Client, error) {
 	defaultMu.Lock()
 	defer defaultMu.Unlock()
 
-	if defaultLib != nil || defaultLibErr != nil {
-		return defaultLib, defaultLibErr
+	if defaultLib != nil {
+		return defaultLib, nil
 	}
 
-	defaultLib, defaultLibErr = OpenDefault()
-	return defaultLib, defaultLibErr
+	client, err := openDefaultClient()
+	if err != nil {
+		return nil, err
+	}
+	defaultLib = client
+	return defaultLib, nil
+}
+
+type packageClient interface {
+	Count(model, text string) (int, error)
+	CountWithOptions(model, text string, options EncodeOptions) (int, error)
+	CountWithEncoding(encoding, text string, options EncodeOptions) (int, error)
+	Encode(model, text string) ([]uint32, error)
+	EncodeWithOptions(model, text string, options EncodeOptions) ([]uint32, error)
+	EncodeWithEncoding(encoding, text string, options EncodeOptions) ([]uint32, error)
+	Decode(model string, tokens []uint32) (string, error)
+	DecodeWithEncoding(encoding string, tokens []uint32) (string, error)
+}
+
+var defaultPackageClient = func() (packageClient, error) {
+	return defaultClient()
 }
 
 func fileExists(path string) bool {

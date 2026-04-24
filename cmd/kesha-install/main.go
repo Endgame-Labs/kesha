@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -10,36 +11,89 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
-
-	"github.com/Endgame-Labs/kesha/tiktokenffi"
 )
+
+const githubBaseURL = "https://github.com"
+
+type releaseTarget struct {
+	goos   string
+	goarch string
+	asset  string
+}
 
 func main() {
 	repo := flag.String("repo", "Endgame-Labs/kesha", "GitHub owner/repo to download from")
-	version := flag.String("version", "latest", "release version, or latest")
+	version := flag.String("version", "auto", "release version, latest, or auto to use the module version from go run ...@vX")
+	targetOS := flag.String("os", runtime.GOOS, "target GOOS release asset to install")
+	targetArch := flag.String("arch", runtime.GOARCH, "target GOARCH release asset to install")
 	dir := flag.String("dir", defaultInstallDir(), "directory to install the native library into")
+	output := flag.String("output", "", "full path to write the native library; overrides -dir")
 	flag.Parse()
 
-	if err := install(*repo, *version, *dir); err != nil {
+	options := installOptions{
+		Repo:    *repo,
+		Version: *version,
+		GOOS:    *targetOS,
+		GOARCH:  *targetArch,
+		Dir:     *dir,
+		Output:  *output,
+	}
+	if err := install(options); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "kesha-install: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func install(repo, version, dir string) error {
-	asset := releaseAssetName()
-	downloadURL := releaseURL(repo, version, asset)
+type installOptions struct {
+	Repo    string
+	Version string
+	GOOS    string
+	GOARCH  string
+	Dir     string
+	Output  string
+}
+
+func install(options installOptions) error {
+	client := &http.Client{Timeout: 2 * time.Minute}
+	return installer{
+		baseURL: githubBaseURL,
+		client:  client,
+	}.install(options)
+}
+
+type installer struct {
+	baseURL string
+	client  *http.Client
+}
+
+func (i installer) install(options installOptions) error {
+	if options.Repo == "" {
+		return errors.New("repo cannot be empty")
+	}
+	if options.GOOS == "" {
+		return errors.New("os cannot be empty")
+	}
+	if options.GOARCH == "" {
+		return errors.New("arch cannot be empty")
+	}
+
+	version := resolveReleaseVersion(options.Version)
+	asset, err := releaseAssetName(options.GOOS, options.GOARCH)
+	if err != nil {
+		return err
+	}
+	downloadURL := releaseURL(i.baseURL, options.Repo, version, asset)
 	checksumURL := downloadURL + ".sha256"
 
-	client := &http.Client{Timeout: 2 * time.Minute}
-	expected, err := downloadChecksum(client, checksumURL)
+	expected, err := downloadChecksum(i.client, checksumURL)
 	if err != nil {
 		return err
 	}
 
-	data, err := download(client, downloadURL)
+	data, err := download(i.client, downloadURL)
 	if err != nil {
 		return err
 	}
@@ -47,11 +101,14 @@ func install(repo, version, dir string) error {
 		return fmt.Errorf("checksum mismatch for %s: got %s, want %s", asset, got, expected)
 	}
 
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	target, err := installTarget(options)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("create install dir: %w", err)
 	}
 
-	target := filepath.Join(dir, tiktokenffi.DefaultLibName())
 	tmp := target + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o755); err != nil {
 		return fmt.Errorf("write temp library: %w", err)
@@ -66,6 +123,28 @@ func install(repo, version, dir string) error {
 	return nil
 }
 
+func resolveReleaseVersion(version string) string {
+	if version != "" && version != "auto" {
+		return version
+	}
+	if moduleVersion := currentModuleVersion(); moduleVersion != "" {
+		return moduleVersion
+	}
+	return "latest"
+}
+
+func currentModuleVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	version := info.Main.Version
+	if version == "" || version == "(devel)" {
+		return ""
+	}
+	return version
+}
+
 func defaultInstallDir() string {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
@@ -74,22 +153,67 @@ func defaultInstallDir() string {
 	return filepath.Join(cacheDir, "kesha")
 }
 
-func releaseAssetName() string {
-	switch runtime.GOOS {
+func installTarget(options installOptions) (string, error) {
+	if options.Output != "" {
+		return options.Output, nil
+	}
+	if options.Dir == "" {
+		return "", errors.New("dir cannot be empty when output is not set")
+	}
+	libName, err := defaultLibName(options.GOOS)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(options.Dir, libName), nil
+}
+
+func defaultLibName(goos string) (string, error) {
+	switch goos {
 	case "darwin":
-		return fmt.Sprintf("libtiktoken_shim_%s_%s.dylib", runtime.GOOS, runtime.GOARCH)
+		return "libtiktoken_shim.dylib", nil
 	case "windows":
-		return fmt.Sprintf("tiktoken_shim_%s_%s.dll", runtime.GOOS, runtime.GOARCH)
+		return "tiktoken_shim.dll", nil
 	default:
-		return fmt.Sprintf("libtiktoken_shim_%s_%s.so", runtime.GOOS, runtime.GOARCH)
+		return "libtiktoken_shim.so", nil
 	}
 }
 
-func releaseURL(repo, version, asset string) string {
-	if version == "latest" {
-		return fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", repo, asset)
+func releaseAssetName(goos, goarch string) (string, error) {
+	if goarch == "" {
+		return "", errors.New("arch cannot be empty")
 	}
-	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, version, asset)
+
+	for _, target := range supportedReleaseTargets() {
+		if target.goos == goos && target.goarch == goarch {
+			return target.asset, nil
+		}
+	}
+
+	return "", fmt.Errorf("unsupported release target %s/%s; supported targets are %s", goos, goarch, supportedReleaseTargetNames())
+}
+
+func supportedReleaseTargets() []releaseTarget {
+	return []releaseTarget{
+		{goos: "darwin", goarch: "arm64", asset: "libtiktoken_shim_darwin_arm64.dylib"},
+		{goos: "linux", goarch: "amd64", asset: "libtiktoken_shim_linux_amd64.so"},
+		{goos: "windows", goarch: "amd64", asset: "tiktoken_shim_windows_amd64.dll"},
+	}
+}
+
+func supportedReleaseTargetNames() string {
+	targets := supportedReleaseTargets()
+	names := make([]string, 0, len(targets))
+	for _, target := range targets {
+		names = append(names, target.goos+"/"+target.goarch)
+	}
+	return strings.Join(names, ", ")
+}
+
+func releaseURL(baseURL, repo, version, asset string) string {
+	if version == "latest" {
+		return fmt.Sprintf("%s/%s/releases/latest/download/%s", strings.TrimRight(baseURL, "/"), repo, asset)
+	}
+	return fmt.Sprintf("%s/%s/releases/download/%s/%s", strings.TrimRight(baseURL, "/"), repo, version, asset)
 }
 
 func downloadChecksum(client *http.Client, url string) (string, error) {
