@@ -18,6 +18,12 @@ import (
 
 const githubBaseURL = "https://github.com"
 
+type releaseTarget struct {
+	goos   string
+	goarch string
+	asset  string
+}
+
 func main() {
 	repo := flag.String("repo", "Endgame-Labs/kesha", "GitHub owner/repo to download from")
 	version := flag.String("version", "auto", "release version, latest, or auto to use the module version from go run ...@vX")
@@ -177,16 +183,30 @@ func releaseAssetName(goos, goarch string) (string, error) {
 		return "", errors.New("arch cannot be empty")
 	}
 
-	switch goos {
-	case "darwin":
-		return fmt.Sprintf("libtiktoken_shim_%s_%s.dylib", goos, goarch), nil
-	case "windows":
-		return fmt.Sprintf("tiktoken_shim_%s_%s.dll", goos, goarch), nil
-	case "linux":
-		return fmt.Sprintf("libtiktoken_shim_%s_%s.so", goos, goarch), nil
-	default:
-		return "", fmt.Errorf("unsupported os %q", goos)
+	for _, target := range supportedReleaseTargets() {
+		if target.goos == goos && target.goarch == goarch {
+			return target.asset, nil
+		}
 	}
+
+	return "", fmt.Errorf("unsupported release target %s/%s; supported targets are %s", goos, goarch, supportedReleaseTargetNames())
+}
+
+func supportedReleaseTargets() []releaseTarget {
+	return []releaseTarget{
+		{goos: "darwin", goarch: "arm64", asset: "libtiktoken_shim_darwin_arm64.dylib"},
+		{goos: "linux", goarch: "amd64", asset: "libtiktoken_shim_linux_amd64.so"},
+		{goos: "windows", goarch: "amd64", asset: "tiktoken_shim_windows_amd64.dll"},
+	}
+}
+
+func supportedReleaseTargetNames() string {
+	targets := supportedReleaseTargets()
+	names := make([]string, 0, len(targets))
+	for _, target := range targets {
+		names = append(names, target.goos+"/"+target.goarch)
+	}
+	return strings.Join(names, ", ")
 }
 
 func releaseURL(baseURL, repo, version, asset string) string {

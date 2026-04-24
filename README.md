@@ -174,7 +174,8 @@ command, choose the container target platform, and write the library directly
 where your app will load it:
 
 ```dockerfile
-ARG KESHA_VERSION=v0.1.0
+# Set this to a released Kesha tag that matches your go.mod requirement.
+ARG KESHA_VERSION
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 RUN go run github.com/Endgame-Labs/kesha/cmd/kesha-install@${KESHA_VERSION} \
@@ -187,7 +188,7 @@ ENV KESHA_TIKTOKEN_LIB=/usr/local/lib/libtiktoken_shim.so
 The installer derives the release version from `go run ...@${KESHA_VERSION}`,
 downloads the platform-specific asset, verifies its SHA-256 sidecar, and writes
 the requested output path. You can override version resolution explicitly with
-`-version v0.1.0`, install the latest release with `-version latest`, or install
+`-version vX.Y.Z`, install the latest release with `-version latest`, or install
 to a directory with `-dir /usr/local/lib`.
 
 ## Local Development

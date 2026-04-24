@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -107,6 +108,19 @@ func TestReleaseAssetNameForPlatform(t *testing.T) {
 		if got != test.want {
 			t.Fatalf("releaseAssetName(%q, %q) = %q, want %q", test.goos, test.goarch, got, test.want)
 		}
+	}
+}
+
+func TestReleaseAssetNameRejectsUnsupportedTarget(t *testing.T) {
+	_, err := releaseAssetName("linux", "arm64")
+	if err == nil {
+		t.Fatal("releaseAssetName succeeded for unsupported target, want error")
+	}
+	if !strings.Contains(err.Error(), "unsupported release target linux/arm64") {
+		t.Fatalf("releaseAssetName error = %q, want unsupported target", err)
+	}
+	if !strings.Contains(err.Error(), "darwin/arm64, linux/amd64, windows/amd64") {
+		t.Fatalf("releaseAssetName error = %q, want supported targets", err)
 	}
 }
 

@@ -67,19 +67,24 @@ func DefaultClient() (*Client, error) {
 // settings.
 func CloseDefaultClient() error {
 	defaultMu.Lock()
-	defer defaultMu.Unlock()
-
-	if defaultLib == nil {
-		return nil
-	}
-	if err := defaultLib.Close(); err != nil {
-		return err
-	}
+	client := defaultLib
 	defaultLib = nil
-	return nil
+	defaultMu.Unlock()
+
+	return client.close()
 }
 
 func (c *Client) Close() error {
+	defaultMu.Lock()
+	if defaultLib == c {
+		defaultLib = nil
+	}
+	defaultMu.Unlock()
+
+	return c.close()
+}
+
+func (c *Client) close() error {
 	if c == nil || c.lib == nil {
 		return nil
 	}

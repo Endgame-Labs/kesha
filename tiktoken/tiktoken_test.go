@@ -91,6 +91,35 @@ func TestDefaultClientCachesSuccessfulOpenAndCanClose(t *testing.T) {
 	}
 }
 
+func TestDefaultClientDirectCloseClearsCache(t *testing.T) {
+	resetDefaultStateForTest(t)
+
+	openCalls := 0
+	openDefaultClient = func() (*Client, error) {
+		openCalls++
+		return &Client{}, nil
+	}
+
+	first, err := DefaultClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := DefaultClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second == first {
+		t.Fatal("DefaultClient reused a directly closed default client")
+	}
+	if openCalls != 2 {
+		t.Fatalf("openDefaultClient called %d times after direct close, want 2", openCalls)
+	}
+}
+
 func TestDefaultClientRetriesAfterOpenError(t *testing.T) {
 	resetDefaultStateForTest(t)
 
