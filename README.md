@@ -16,6 +16,10 @@ Install the native library for a supported platform:
 go run github.com/Endgame-Labs/kesha/cmd/kesha-install@latest
 ```
 
+When the installer is run with `go run ...@vX`, it installs the native release
+asset from the same Kesha module version by default and verifies the `.sha256`
+sidecar before writing the library.
+
 From your Go app's module directory, add Kesha:
 
 ```bash
@@ -42,6 +46,10 @@ func main() {
 	fmt.Println(count)
 }
 ```
+
+Package-level helpers use a cached process-wide default client, so callers do
+not need to call `OpenDefault` per request or manage native library handles for
+common `Count`, `Encode`, and `Decode` calls.
 
 If your app cannot find the native library automatically, set:
 
@@ -78,6 +86,20 @@ for a more automatic Go experience, but the current model keeps the native
 library install visible and verifiable.
 
 ## API Examples
+
+Prefer the package-level helpers for most application code:
+
+```go
+count, err := tiktoken.CountWithOptions("gpt-4o", rawText, tiktoken.TreatSpecialTokensAsText())
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(count)
+```
+
+`TreatSpecialTokensAsText` is intended for embedding, document, and other raw
+content paths where text such as `<|endoftext|>` should be counted or encoded
+as literal content instead of triggering the default special-token safety error.
 
 Create an explicit client when you want to control the library path or
 lifecycle:
@@ -120,8 +142,53 @@ tokens, err := tiktoken.EncodeWithOptions("gpt-4", "<|endoftext|>", tiktoken.Enc
 })
 ```
 
+The equivalent helper form is:
+
+```go
+tokens, err := tiktoken.EncodeWithOptions("gpt-4", "<|endoftext|>", tiktoken.TreatSpecialTokensAsText())
+```
+
 The default mode matches upstream Python `tiktoken` and errors when disallowed
 special-token text is present.
+
+If you want the cached default client but explicit methods, use:
+
+```go
+client, err := tiktoken.DefaultClient()
+if err != nil {
+	log.Fatal(err)
+}
+tokens, err := client.EncodeWithOptions("gpt-4o", rawText, tiktoken.TreatSpecialTokensAsText())
+```
+
+Most applications should leave the default client open for the life of the
+process. Tests and short-lived tools can call `tiktoken.CloseDefaultClient()`
+when they need to release the native library handle or change discovery
+settings.
+
+## Docker Usage
+
+Docker builds can install a matching native library without hand-assembling
+release URLs or checksums. Pin the Go module version once in the `go run`
+command, choose the container target platform, and write the library directly
+where your app will load it:
+
+```dockerfile
+ARG KESHA_VERSION=v0.1.0
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+RUN go run github.com/Endgame-Labs/kesha/cmd/kesha-install@${KESHA_VERSION} \
+    -os ${TARGETOS} \
+    -arch ${TARGETARCH} \
+    -output /usr/local/lib/libtiktoken_shim.so
+ENV KESHA_TIKTOKEN_LIB=/usr/local/lib/libtiktoken_shim.so
+```
+
+The installer derives the release version from `go run ...@${KESHA_VERSION}`,
+downloads the platform-specific asset, verifies its SHA-256 sidecar, and writes
+the requested output path. You can override version resolution explicitly with
+`-version v0.1.0`, install the latest release with `-version latest`, or install
+to a directory with `-dir /usr/local/lib`.
 
 ## Local Development
 

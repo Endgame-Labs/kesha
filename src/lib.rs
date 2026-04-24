@@ -881,3 +881,45 @@ pub unsafe extern "C" fn tiktoken_free_u32_buffer(ptr: *mut u32, len: u64) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_as_text_treats_special_token_strings_as_literal_text() {
+        let encoding = get_encoding("cl100k_base").expect("load encoding");
+        let text = "<|endoftext|>";
+
+        let disallowed = encode_tokens(
+            &encoding,
+            text,
+            SpecialMode::Disallow as u32,
+            std::ptr::null(),
+        )
+        .expect_err("special token text should be disallowed by default");
+        assert!(disallowed.contains("disallowed special token"));
+
+        let literal = encode_tokens(
+            &encoding,
+            text,
+            SpecialMode::EncodeAsText as u32,
+            std::ptr::null(),
+        )
+        .expect("encode special-token text literally");
+        assert_ne!(literal, vec![100257]);
+        assert_eq!(
+            decode_tokens(&encoding, &literal).expect("decode literal tokens"),
+            text
+        );
+
+        let special = encode_tokens(
+            &encoding,
+            text,
+            SpecialMode::AllowAll as u32,
+            std::ptr::null(),
+        )
+        .expect("encode special token");
+        assert_eq!(special, vec![100257]);
+    }
+}
