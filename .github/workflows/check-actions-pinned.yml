@@ -1,0 +1,17 @@
+name: Check Actions Pinned
+
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+
+permissions:
+  contents: read
+
+jobs:
+  check-actions-pinned:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Require full commit SHAs for remote actions
+        run: bash .github/scripts/check-actions-pinned.sh
